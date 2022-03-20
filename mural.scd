@@ -22,7 +22,7 @@ var targetServer = NetAddr(targetAddress, targetPort);
 var onsetTrig = 0;
 
 ///////////////////////////////////////// FUNCTIONS /////////////////////////////////////////
-~createPlayBufs = { |bufs, amps, pans∂, panCenter=0, panWidth=0.5, onsetBuses, target|
+~createPlayBufs = { |bufs, amps, pans, panCenter=0, panWidth=0.5, onsetBuses, target|
     var n, synths;
 
     n = bufs.size;
@@ -166,7 +166,7 @@ SynthDef(\playBuf, { |bufnum, onsetBus, out=0, loop=1, amp=0.01, area=0.5, rate=
 
     var smoothArea = Lag3.kr(area, 1);
 
-    smoothArea.poll.postln;
+    // smoothArea.poll.postln;
 
     Out.ar(out, PanAz.ar(
         numChans: 4,
