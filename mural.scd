@@ -1,4 +1,8 @@
-~buffers = SoundFile.collectIntoBuffers(thisProcess.nowExecutingPath.dirname +/+ "sounds" +/+ "*";, s).do { |f| f.path.postln; };
+(
+~buffers = SoundFile.collectIntoBuffers(thisProcess.nowExecutingPath.dirname +/+ "sounds" +/+ "*";, s).do {
+    |f| PathName(f.path).fileNameWithoutExtension.postln;
+};
+)
 
 ////////////////////////////////////////////// SETUP /////////////////////////////////////////////////////
 (
@@ -15,150 +19,17 @@ VSTPlugin.search(
         var higherThresh = 0.75;
 
         var targetAddress = FileReader.read(thisProcess.nowExecutingPath.dirname +/+ "CONFIG")[0][0];
-        var targetPort = 57120;
+        var targetPort = 57121;
+        var onsetTrig = 0;
         var targetServer = NetAddr(targetAddress, targetPort);
 
-        var onsetTrig = 0;
+         ///////////////////////////////////////// SYNTHDEFS /////////////////////////////////////
+        SynthDef(\convolution, { |in, out|
+            var signal = In.ar(in, 1);
+            Out.ar(out, VSTPlugin.ar(signal!2, 2, id: \convolution));
+        }).add;
 
-        ///////////////////////////////////////// FUNCTIONS /////////////////////////////////////////
-        ~createPlayBufs = { |bufs, amps, pans, panCenter=0, panWidth=0.5, onsetBuses, target|
-            var n, synths;
-
-            n = bufs.size;
-            synths = Array(n);
-            if (pans.isNil, {
-                pans = Array.fill(n, { |i| (panCenter - panWidth / 2) + ((panWidth / (n-1)) * i) });
-            });
-
-            bufs.do({ |b, i|
-                synths.add(
-                    Synth(\playBuf, [
-                        bufnum: bufs[i],
-                        onsetBus: onsetBuses[bufs[i]],
-                        amp: amps.wrapAt(i),
-                        pos: pans.wrapAt(i),
-                    ], target)
-                );
-            });
-
-            synths
-        };
-
-        ~createOnsetBuses = { |bufnums|
-            var onsetBuses = Array(bufnums.size);
-
-            bufnums.do({ |id|
-                onsetBuses.add(Bus.audio(s, 1));
-            });
-
-            onsetBuses
-        };
-
-        ~createOnsetDetectors = { |bufnums|
-            var onsetBuses;
-
-            onsetBuses = ~createOnsetBuses.(bufnums);
-
-            onsetBuses.do({ |bus, i|
-                var id = bufnums[i];
-
-                Synth(\onsetDetector, [
-                    in: bus,
-                    id: id,
-                ], ~onsetdetectors_group);
-            });
-
-            onsetBuses
-        };
-
-        ~pans = { |n, panCenter, panWidth|
-            Pgauss(panCenter, panWidth/2, n).asStream.nextN(n);
-            // Array.fill(n, { |i| (panCenter - panWidth / 2) + ((panWidth / (n-1)) * i) });
-        };
-
-        ////////////////////////////////////////// SLIDERS //////////////////////////////////////////
-        /*window = Window.new.front;
-        window.view.decorator=FlowLayout(window.view.bounds);
-        window.view.decorator.gap=2@2;
-        distanceSlider = EZSlider(
-        parent: window,
-        bounds: 392@16,
-        label: " distance ",
-        unitWidth: 30,
-        numberWidth: 60,
-        action: { |ez|
-        NetAddr.localAddr.sendMsg("/distance", ez.value);
-        },
-        );
-        colorSlider = EZSlider(
-        parent: window,
-        bounds: 392@16,
-        label: " color ",
-        unitWidth: 30,
-        numberWidth: 60,
-        action: { |ez|
-        targetServer.sendMsg("/color", ez.value);
-        },
-        );*/
-
-        ///////////////////////////////////////// OSCDEFS ///////////////////////////////////////////
-        OSCdef(\tr, { |msg|
-            var id = msg[2];
-
-            // color
-            if (id == -1, {
-                var value = msg[3];
-                var rampTime = 5.0; // rrand(0.5, 1.0);
-                targetServer.sendMsg("/color", value, rampTime);
-            },
-            // ripples
-            {
-                onsetTrig = onsetTrig * (-1) + 1;
-                if (onsetTrig > 0, {
-                    var clippedAmp;
-
-                    ~sansulas[id].get(\amp, { |amp|
-                        clippedAmp = amp.linlin(0, ~amp_max, 0, 1);
-
-                        // NetAddr.localAddr.sendMsg("/ripple", id, clippedAmp);
-                        targetServer.sendMsg("/ripple", id, clippedAmp);
-                    });
-                });
-            })
-
-        },"/tr");
-
-        OSCdef(\ripple, { |msg|
-            msg.postln;
-        }, "/ripple");
-
-        OSCdef(\area, { |msg|
-            var val = (1-(msg[1].clip(0, 1)));
-            // var clippedArea = val.linlin(0, 1, 0, 1);
-            var clippedArea = val;
-
-            ~sansula_group.set(\area, clippedArea);
-        }, "/area");
-
-        OSCdef(\color, { |msg|
-            targetServer.sendMsg("/color", msg[1]);
-            // colorSlider.value = msg[1];
-        }, "/color");
-
-        ///////////////////////////////////////// GROUPS ////////////////////////////////////////
-        ~src_group = Group(s);
-        ~sansula_group = Group(~src_group);
-        ~onsetdetectors_group = Group.after(~sansula_group);
-
-        ~fx_group = Group.after(~src_group);
-
-        ~master_group = Group.after(~fx_group);
-
-        ///////////////////////////////////////// BUSES /////////////////////////////////////////
-        ~master_bus = Bus.audio(s, 4);
-
-        ///////////////////////////////////////// SYNTHDEFS /////////////////////////////////////
-        SynthDef(\playBuf, { |bufnum, onsetBus, out=0, loop=1, amp=0.01, area=0.5, rate=1, pos, prevPos, gate, t_trig, del=0, att=5, dec=0.8, sus=0.8, rel=5, peak=0.2|
+        SynthDef(\playBuf, { |bufnum, onsetBus, out=0, loop=1, amp=0.01, area=0.5, rate=1, pos, prevPos, gate, t_trig, del=0, att=5, dec=0.8, sus=0.8, rel=5, peak=0.2, grpAmp=1|
             var aOrB, crossfade, panAorB, pancrossfade, pos1, pos2;
             var d_rndPan, d_rndPanRange, rndPan, rndPanRange;
             var buf1, buf2, env, gen, sig;
@@ -167,20 +38,20 @@ VSTPlugin.search(
             crossfade = Lag.ar(K2A.ar(aOrB), 5);
 
             panAorB = ToggleFF.kr(t_trig);
-            pancrossfade = Lag3.ar(K2A.ar(panAorB), 5);
+            pancrossfade = Lag.ar(K2A.ar(panAorB), 5);
 
             d_rndPan = Dwhite(0.01, 0.5, inf);
             d_rndPanRange = Dwhite(0.01, 0.05, inf);
 
             env = Env.dadsr(del, att, dec, sus, rel, peak, [0, 2, -4, 0]);
-            gen = EnvGen.kr(env, gate);
+            gen = EnvGen.ar(env, gate);
 
             buf1 = PlayBuf.ar(
                 numChannels: 1,
                 bufnum: bufnum,
                 rate: rate,
                 loop: loop,
-                doneAction: 2,
+                // doneAction: 2,
             );
 
             buf2 = PlayBuf.ar(
@@ -188,7 +59,7 @@ VSTPlugin.search(
                 bufnum: bufnum,
                 rate: rate,
                 loop: loop,
-                doneAction: 2,
+                // doneAction: 2,
             );
 
             rndPan = Demand.kr(t_trig, 0, d_rndPan);
@@ -202,66 +73,317 @@ VSTPlugin.search(
                 numChans: 4,
                 in: sig,
                 pos: (pancrossfade*pos) + ((1-pancrossfade) * prevPos),
-                level: amp // *2*smoothArea,
+                level: amp*grpAmp, // *2*smoothArea,
             ));
 
-            Out.ar(onsetBus, sig*amp*gate);
+            Out.ar(onsetBus, sig*gate*grpAmp);
         }).add;
 
-        SynthDef(\onsetDetector, { |in, id, thresh=0.04, mingap=50 |
+        SynthDef(\panningPlayBuf, { |bufnum, onsetBus, out=0, loop=1, amp=0.01, area=0.5, rate=1, gate=1, del=0, att=0.1, dec=0.8, sus=0.8, rel=5, peak=0.2, panRate, filtfreq=2500, rq=1, t_trig, grpAmp=1|
+            var buf, env, gen, filter, sig;
+            var frames, duration;
+
+            SendTrig.kr(t_trig, -1, bufnum);
+
+            rate = rate * BufRateScale.kr(bufnum);
+            frames = BufFrames.kr(bufnum);
+            duration = frames/rate.abs/44100;
+
+            env = Env.perc(att, rel);
+            gen = EnvGen.ar(env, gate, timeScale: duration, doneAction: 2);
+
+            buf = PlayBuf.ar(
+                numChannels: 1,
+                bufnum: bufnum,
+                rate: rate,
+                loop: loop,
+                doneAction: 2,
+            );
+
+            filter = RLPF.ar(buf * gen, filtfreq, rq);
+
+            sig = filter;
+
+            Out.ar(out, PanAz.ar(
+                numChans: 4,
+                in: sig,
+                pos: LFSaw.kr(panRate),
+                level: amp*grpAmp, // *2*smoothArea,
+            ));
+
+            Out.ar(onsetBus, sig*gate*grpAmp);
+        }).add;
+
+        SynthDef(\onsetDetector, { |in, id, thresh=0.04, mingap=50, odftype |
             var sig, chain, onsets, pips, trig;
 
             sig = In.ar(in, 2);
             chain = FFT(LocalBuf(512), sig);
-            onsets = Onsets.kr(chain, thresh, relaxtime: 5, mingap: mingap);
+            onsets = Onsets.kr(chain, thresh, odftype, relaxtime: 5, mingap: mingap);
 
             SendTrig.kr(onsets, id, id);
         }).add;
+
+        ///////////////////////////////////////// FUNCTIONS /////////////////////////////////////////
+        ~bus_ctrl = { |bus, newVal, fadeTime=5|
+            bus.get({ |val| {
+                // var fade = EnvGen.kr(Env([val, newVal], [fadeTime], 'sin'), doneAction: 2);
+                Out.kr(bus, Ramp.kr(Env.linen(fadeTime)));
+            }.play;
+            });
+        };
+
+        ~createOnsetDetectors = { |bufnums|
+            var onsetBuses = Array.fill(bufnums.size, { |id| Bus.audio(s, 1); });
+            var sansula_mingaps = #[128, 128, 60, 60, 60, 60];
+
+            onsetBuses.do({ |bus, i|
+                var id = bufnums[i];
+
+                Synth(\onsetDetector, [
+                    in: bus,
+                    id: id,
+                    thresh: 0.12,
+                    mingap: sansula_mingaps[i],
+                    odftype: \rcomplex,
+                ], ~onsetdetectors_group);
+            });
+
+            onsetBuses
+        };
+
+        ~pans = { |n, panCenter, panWidth|
+            Pgauss(panCenter, panWidth/2, n).asStream.nextN(n);
+            // Array.fill(n, { |i| (panCenter - panWidth / 2) + ((panWidth / (n-1)) * i) });
+        };
+
+        ///////////////////////////////////////// OSCDEFS ///////////////////////////////////////////
+        OSCdef(\tr, { |msg|
+            var id = msg[2];
+
+            if (id == -1, {
+                var bufnum = msg[3];
+                ~color = ~color + rrand(0.2, 0.4) % 1;
+                targetServer.sendMsg("/color", ~color, 0.5);
+            }, {
+                // ripples
+                onsetTrig = onsetTrig * (-1) + 1;
+
+                if ((onsetTrig > 0) && (id >= 0) && (id < 7), {
+                    var clippedAmp;
+
+                    ~sansulas[id].get(\amp, { |amp|
+                        clippedAmp = amp.linlin(0, ~sansula_amps.maxItem*2, 0, 1);
+
+                        // NetAddr.localAddr.sendMsg("/ripple", id, clippedAmp);
+                        targetServer.sendMsg("/ripple", id, clippedAmp);
+                    });
+                });
+            });
+
+        },"/tr");
+
+        OSCdef(\ripple, { |msg|
+            msg.postln;
+        }, "/ripple");
+
+        OSCdef(\area, { |msg|
+            ~bus_ctrl.(msg[1])
+        });
+
+        OSCdef(\blob, { |msg|
+            ~blob_buffer[~blob_i] = msg[1];
+            ~blob_i = (~blob_i + 1) % (~blob_buffer.size);
+
+            ~cymbal_amp_ctrl.get({ |val|
+                if ((val == 1) and: (~blob_buffer.detect({ |i| i == 0; }).isNil), {
+                    ~bus_ctrl.(~cymbal_amp_ctrl, 0);
+                    ~bus_ctrl.(~sansula_amp_ctrl, 1, fadeTime: 8);
+                });
+            });
+
+            ~sansula_amp_ctrl.get({ |val|
+                if ((val == 1) and: (~blob_buffer.detect({ |i| i == 1; }).isNil), {
+                    ~bus_ctrl.(~sansula_amp_ctrl, 0);
+                    ~bus_ctrl.(~cymbal_amp_ctrl, 1, fadeTime: 8);
+                });
+            });
+
+        }, "/blob");
+
+        ///////////////////////////////////////// GROUPS ////////////////////////////////////////
+        ~src_group = Group(s);
+
+        ~couscous_group = Group(~src_group);
+        ~sansula_group = Group.after(~couscous_group);
+        ~chess_group = Group.after(~sansula_group);
+        ~cymbal_group = Group.after(~chess_group);
+
+        ~onsetdetectors_group = Group.after(~src_group);
+
+        ~fx_group = Group.after(~onsetdetectors_group);
+
+        ~master_group = Group.after(~fx_group);
+
+        ///////////////////////////////////////// BUSES /////////////////////////////////////////
+
+        ~conv_bus = Bus.audio(s, 4);
+        ~master_bus = Bus.audio(s, 4);
+
+        ///////////////////////////////////////// BUS CONTROL //////////////////////////////////
+
+        ~sansula_area_ctrl = Bus.control(s);
+        ~cymbal_area_ctrl = Bus.control(s);
+
+        ~sansula_group.map(\area, ~sansula_area_ctrl);
+        ~cymbal_group.map(\area, ~cymbal_area_ctrl);
+
+        ~sansula_amp_ctrl = Bus.control(s);
+        ~cymbal_amp_ctrl = Bus.control(s);
+
+        ~sansula_group.map(\grpAmp, ~sansula_amp_ctrl);
+        ~cymbal_group.map(\grpAmp, ~cymbal_amp_ctrl);
+
+        ~sansula_amp_ctrl.value = 0;
+        ~cymbal_amp_ctrl.value = 1;
+
+        ///////////////////////////////////////// VSTS /////////////////////////////////////////
+        ~convolution0 = VSTPluginController(Synth(\convolution, [\in, ~conv_bus, \out, 0], ~fx_group), id: \convolution);
+        ~convolution0.open(
+            "Convology XT.vst3",
+            editor: true,
+            verbose: true,
+            action: {
+                ~convolution0.loadPreset("arundel");
+            },
+        );
+
+        ~convolution2 = VSTPluginController(Synth(\convolution, [\in, ~conv_bus, \out, 2], ~fx_group), id: \convolution);
+        ~convolution2.open(
+            "Convology XT.vst3",
+            editor: true,
+            verbose: true,
+            action: {
+                ~convolution2.loadPreset("arundel");
+            },
+        );
+
+        ///////////////////////////////////////// BUFNUMS ////////////////////////////////////
+        ~couscous_bufnums = 0;
+        ~sansula_bufnums = (1..6);
+        ~chess_bufnums = (7..8);
+        ~cymbal_bufnums = (9..14);
+
+        //////////////////////////////////////// MISC ////////////////////////////////////////
+        ~color = 1.0.rand;
+        ~cymbal_durations = [8.5225850340136, 7.3956689342404, 11.750975056689, 17.512063492063, 13.389569160998, 11.853015873016];
+        ~blob_buffer = Array.fill(120, { |i| 0 });
+        ~blob_i = 0;
+
+        //////////////////////////////////////// AMPS ////////////////////////////////////////
+        ~couscous_amps = #[0.2];
+        ~sansula_amps = #[0.2, 0.2, 0.14, 0.06, 0.02, 0.004];
+        ~chess_amps = #[0.2, 0.3];
+        ~cymbal_amps = #[0.05, 0.05, 0.05, 0.05, 0.05, 0.05];
+
+        ///////////////////////////////////////// SYNTHS /////////////////////////////////////
+
+        ~generate_playbufs = { |key, startId, amps, out, target, args |
+            var dict = Dictionary();
+
+            (amps.size).do({ |id|
+                dict.put(id, Synth(key, args ++ [
+                    bufnum: startId + id,
+                    onsetBus: ~onset_buses[startId + id],
+                    amp: amps[id],
+                    out: out,
+                ], target));
+            });
+
+            dict
+        };
 });
 /*});*/
 
 )
 
+~convolution2.editor;
+
+~convolution2.savePreset("arundel");
+
+(
+var bufnum = Pxrand(~cymbal_bufnums, inf);
+
+Pdef(\cymbals,
+    Pbind(
+        \instrument, \panningPlayBuf,
+        \bufnum, bufnum,
+        \amp, Pgauss(0.3, 0.1, inf),
+        \rate, Pgauss(1.2, 0.6666, inf),
+        \panRate, Pgauss(1, 0.6666, inf),
+        \delta, Pgauss(20, 5, inf),
+        \filtfreq, Pgauss(1500, 250, inf),
+        \t_trig, 1,
+        \callback, { ~send_color.(bufnum.asStream.next); },
+    )
+);
+)
+
+Pdef(\cymbals).play
+
+
 ///////////////////////////////////////// PLAY /////////////////////////////////////////
 (
 
-var bufnums = (1..6);
-var amps = #[0.2, 0.2, 0.14, 0.06, 0.02, 0.004];
-~amp_max = amps.maxItem * 2;
+~onset_buses = ~createOnsetDetectors.((0..14));
 
-~onset_buses = ~createOnsetDetectors.(bufnums);
-~sansulas = Dictionary(6);
+/*~couscous = ~generate_playbufs.(
+key: \playBuf,
+startId: 0,
+amps: ~couscous_amps,
+out: 0,
+target: ~couscous_group,
+);*/
+~sansulas = ~generate_playbufs.(
+    key: \playBuf,
+    startId: 1,
+    amps: ~sansula_amps,
+    out: 0,
+    target: ~sansula_group,
+);
+/*~chess = ~generate_playbufs.(
+key: \playBuf,
+startId: 7,
+amps: ~chess_amps,
+out: 0,
+target: ~chess_group,
+);
+~cymbals = ~generate_playbufs.(
+key: \panningPlayBuf,
+startId: 9,
+amps: ~cymbal_amps,
+out: ~conv_bus,
+target: ~cymbal_group,
+args: [\panRate, 2],
+);*/
 
-~generate_sansulas = { |n|
-    (n+1).do({ |id|
-        ~sansulas.put(id, Synth(\playBuf, [
-            bufnum: id+1,
-            onsetBus: ~onset_buses[id],
-            amp: amps[id],
-        ], ~sansula_group));
-    });
-}.(bufnums.size);
-
-~random_play_sansulas = { |bufnums|
-    var buffleShuffle = Pshuf(bufnums - 1, 1).asStream;
+~random_play_sansulas = {
+    var buffleShuffle = Pshuf(~sansula_bufnums, 1).asStream;
     var nakki = Pxrand([2, 3, 4, 5], 1).asStream;
 
     var n = nakki.next;
     var bufs = buffleShuffle.nextN(n);
 
     var pans = ~pans.(n, panCenter: 2.0.rand2, panWidth: 1.5);
-    var amps = #[0.2, 0.2, 0.14, 0.06, 0.02, 0.004];
     var atts = #[2.5, 2, 2, 1.5, 1.25, 1];
     var rndrat = 0.01;
-
-    [bufs, pans].postln;
 
     bufs.do({ |id|
         ~sansulas[id].get(\pos, { |prevPos|
             ~sansulas[id].set(\prevPos, prevPos);
             ~sansulas[id].set(\pos, pans[id]);
-            ~sansulas[id].set(\amp, amps[id]*rrand(1, 2));
-            ~sansulas[id].set(\del, rrand(0.5, 10));
+            ~sansulas[id].set(\amp, ~sansula_amps[id]*rrand(1, 2));
+            ~sansulas[id].set(\del, exprand(0.5, 10));
             ~sansulas[id].set(\att, atts[id] + rrand(2, 5));
             ~sansulas[id].set(\dec, atts[id] + rrand(0.8, 3.2));
             ~sansulas[id].set(\rel, atts[id] + rrand(0.5, 1));
@@ -275,44 +397,29 @@ var amps = #[0.2, 0.2, 0.14, 0.06, 0.02, 0.004];
 };
 
 fork {
-    ~currently_playing = ~random_play_sansulas.(bufnums);
+    ~currently_playing = ~random_play_sansulas.();
     loop {
         rrand(30.0, 50.0).yield;
         ~currently_playing.do({ |id| ~sansulas[id].set(\gate, 0) });
-        rrand(3.5, 6.5).yield;
-        ~currently_playing = ~random_play_sansulas.(bufnums);
+        rrand(3.5, 4).yield;
+        ~currently_playing = ~random_play_sansulas.();
     }
 };
 
-/*~generate_sansulas = { |n, ids|
-    var pans = ~pans.(n, panCenter: 2.0.rand2, panWidth: 2);
-    var amps = #[0.1, 0.1, 0.07, 0.03, 0.01, 0.002];
+)
 
-    ids.do({ |id|
-        ~sansulas.put(id, Synth(\playBuf, [
-            bufnum: id+1,
-            onsetBus: ~onset_buses[id],
-            amp: amps[id] * 2.0.rand,
-            pos: pans[id],
-            gate: 1,
-        ], ~sansula_group));
-    });
-};*/
+    exprand(0.01, 1)
 
-/*{
-    var shuffled = Pshuf(bufnums, inf).asStream;
-    var n = Pxrand([2, 3, 4, 5], inf).asStream;
-    {
-        var current, next;
+///////////////////////////////////////// END /////////////////////////////////////////
 
-        current = ~generate_sansulas.(n.next, shuffled.nextN(n));
-        10.wait;
-        current.do({ |id|
-            ~sansulas[id].set(\gate, 0);
-        })
-        next = ~generate_sansulas.(n.next, shuffed.nextN(n));
-    }.();
-}.();*/
+{ EnvGen.kr(Env([0, 1], [5], 'sin'), doneAction: 2); }.plot(5)
+{ EnvGen.kr(Env.linen) }.plot(2);
+{ Lag3.kr(WhiteNoise.kr(1), 1) }.plot(2)
+{ Ramp.kr(WhiteNoise.kr(1), 1) }.plot(2)
+
+
+
+/*
 
 // simulate color
 x = {
@@ -322,45 +429,4 @@ x = {
     SendTrig.kr(sig, -1, randomVal);
 }.play;
 
-)
-
-(
-var bufnums = (1..6);
-~generate_sansulas = { |n|
-    var amps = #[0.2, 0.2, 0.14, 0.06, 0.02, 0.004];
-    (n+1).do({ |id|
-        ~sansulas.put(id, Synth(\playBuf, [
-            bufnum: id+1,
-            onsetBus: ~onset_buses[id],
-            amp: amps[id],
-        ], ~sansula_group));
-    });
-}.(bufnums.size);
-)
-
-~sansulas[0].set(\gate, 1)
-~sansulas[0].set(\pos, -0.25)
-~sansulas[0].set(\t_trig, 1)
-
-///////////////////////////////////////// END /////////////////////////////////////////
-
-
-
-
-(
-Pdef(\hi,
-    Pbind(
-        \instrument, \playBuf,
-        \bufnum, 1,
-        \rate, 2,
-        \pos, 1,
-        \dur, 5,
-    )
-)
-)
-
-Pdef(\hi).play;
-Pdef(\hi).freeAll;
-
-
-
+*/
