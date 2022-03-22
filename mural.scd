@@ -274,7 +274,7 @@ VSTPlugin.search(
 
         //////////////////////////////////////// AMPS ////////////////////////////////////////
         ~couscous_amps = #[0.2];
-        ~sansula_amps = #[0.2, 0.2, 0.14, 0.06, 0.02, 0.004];
+        ~sansula_amps = #[0.2, 0.2, 0.14, 0.06, 0.02, 0.004] * 1.5;
         ~chess_amps = #[0.2, 0.3];
         ~cymbal_amps = #[0.05, 0.05, 0.05, 0.05, 0.05, 0.05];
 
@@ -319,11 +319,11 @@ Pdef(\cymbals,
         \instrument, \panningPlayBuf,
         \bufnum, ~cymbal_bufnum,
         \amp, Pgauss(0.3, 0.1, inf),
+        \grpAmp, ~cymbal_amp_ctrl.asMap,
         \rate, Pgauss(1.2, 0.6666, inf),
         \panRate, Pgauss(1, 0.6666, inf),
         \delta, Pgauss(20, 5, inf),
         \filtfreq, Pgauss(1500, 250, inf),
-        \target, ~cymbal_group,
         \t_trig, 1,
         \callback, { ~send_color.(~cymbal_bufnum.asStream.next); },
     )
@@ -419,7 +419,6 @@ args: [\panRate, 2],
 ~cymbal_amp_ctrl = Bus.control(s);
 
 ~sansula_group.map(\grpAmp, ~sansula_amp_ctrl);
-~cymbal_group.map(\grpAmp, ~cymbal_amp_ctrl);
 
 ~bus_ctrl.(~sansula_amp_ctrl, 0, 0.1);
 ~bus_ctrl.(~cymbal_amp_ctrl, 1, 0.1);
