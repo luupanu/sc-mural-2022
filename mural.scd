@@ -127,8 +127,9 @@ VSTPlugin.search(
         ///////////////////////////////////////// FUNCTIONS /////////////////////////////////////////
         ~bus_ctrl = { |bus, newVal, fadeTime=5|
             bus.get({ |val| {
-                // var fade = EnvGen.kr(Env([val, newVal], [fadeTime], 'sin'), doneAction: 2);
-                Out.kr(bus, Ramp.kr(Env.linen(fadeTime)));
+                var fade = EnvGen.kr(Env([val, newVal], [fadeTime], 'sin'), doneAction: 2);
+                // Out.kr(bus, Ramp.kr(Env.linen(fadeTime)));
+                Out.kr(bus, fade);
             }.play;
             });
         };
@@ -164,7 +165,7 @@ VSTPlugin.search(
             if (id == -1, {
                 var bufnum = msg[3];
                 ~color = ~color + rrand(0.2, 0.4) % 1;
-                targetServer.sendMsg("/color", ~color, 0.5);
+                // targetServer.sendMsg("/color", ~color, 0.5);
             }, {
                 // ripples
                 onsetTrig = onsetTrig * (-1) + 1;
@@ -176,7 +177,7 @@ VSTPlugin.search(
                         clippedAmp = amp.linlin(0, ~sansula_amps.maxItem*2, 0, 1);
 
                         // NetAddr.localAddr.sendMsg("/ripple", id, clippedAmp);
-                        targetServer.sendMsg("/ripple", id, clippedAmp);
+                        // targetServer.sendMsg("/ripple", id, clippedAmp);
                     });
                 });
             });
@@ -196,16 +197,22 @@ VSTPlugin.search(
             ~blob_i = (~blob_i + 1) % (~blob_buffer.size);
 
             ~cymbal_amp_ctrl.get({ |val|
-                if ((val == 1) and: (~blob_buffer.detect({ |i| i == 0; }).isNil), {
+                if ((val == 1) and: (~blob_buffer.detect({ |i| i == 0; }).isNil) and: (~blob_lock == 0), {
+                    ~blob_lock = 1;
                     ~bus_ctrl.(~cymbal_amp_ctrl, 0);
                     ~bus_ctrl.(~sansula_amp_ctrl, 1, fadeTime: 8);
+
+                    { 9.wait; ~blob_lock = 0; }.fork;
                 });
             });
 
             ~sansula_amp_ctrl.get({ |val|
-                if ((val == 1) and: (~blob_buffer.detect({ |i| i == 1; }).isNil), {
+                if ((val == 1) and: (~blob_buffer.detect({ |i| i == 1; }).isNil) and: (~blob_lock == 0), {
+                    ~blob_lock = 1;
                     ~bus_ctrl.(~sansula_amp_ctrl, 0);
                     ~bus_ctrl.(~cymbal_amp_ctrl, 1, fadeTime: 8);
+
+                    { 9.wait; ~blob_lock = 0; }.fork;
                 });
             });
 
@@ -229,23 +236,6 @@ VSTPlugin.search(
 
         ~conv_bus = Bus.audio(s, 4);
         ~master_bus = Bus.audio(s, 4);
-
-        ///////////////////////////////////////// BUS CONTROL //////////////////////////////////
-
-        ~sansula_area_ctrl = Bus.control(s);
-        ~cymbal_area_ctrl = Bus.control(s);
-
-        ~sansula_group.map(\area, ~sansula_area_ctrl);
-        ~cymbal_group.map(\area, ~cymbal_area_ctrl);
-
-        ~sansula_amp_ctrl = Bus.control(s);
-        ~cymbal_amp_ctrl = Bus.control(s);
-
-        ~sansula_group.map(\grpAmp, ~sansula_amp_ctrl);
-        ~cymbal_group.map(\grpAmp, ~cymbal_amp_ctrl);
-
-        ~sansula_amp_ctrl.value = 0;
-        ~cymbal_amp_ctrl.value = 1;
 
         ///////////////////////////////////////// VSTS /////////////////////////////////////////
         ~convolution0 = VSTPluginController(Synth(\convolution, [\in, ~conv_bus, \out, 0], ~fx_group), id: \convolution);
@@ -279,6 +269,8 @@ VSTPlugin.search(
         ~cymbal_durations = [8.5225850340136, 7.3956689342404, 11.750975056689, 17.512063492063, 13.389569160998, 11.853015873016];
         ~blob_buffer = Array.fill(120, { |i| 0 });
         ~blob_i = 0;
+        ~cymbal_bufnum = 0;
+        ~blob_lock = 0;
 
         //////////////////////////////////////// AMPS ////////////////////////////////////////
         ~couscous_amps = #[0.2];
@@ -311,39 +303,36 @@ VSTPlugin.search(
 
 ~convolution2.savePreset("arundel");
 
-(
-var bufnum = Pxrand(~cymbal_bufnums, inf);
-
-Pdef(\cymbals,
-    Pbind(
-        \instrument, \panningPlayBuf,
-        \bufnum, bufnum,
-        \amp, Pgauss(0.3, 0.1, inf),
-        \rate, Pgauss(1.2, 0.6666, inf),
-        \panRate, Pgauss(1, 0.6666, inf),
-        \delta, Pgauss(20, 5, inf),
-        \filtfreq, Pgauss(1500, 250, inf),
-        \t_trig, 1,
-        \callback, { ~send_color.(bufnum.asStream.next); },
-    )
-);
-)
-
-Pdef(\cymbals).play
-
 
 ///////////////////////////////////////// PLAY /////////////////////////////////////////
 (
 
 ~onset_buses = ~createOnsetDetectors.((0..14));
 
-/*~couscous = ~generate_playbufs.(
-key: \playBuf,
-startId: 0,
-amps: ~couscous_amps,
-out: 0,
-target: ~couscous_group,
-);*/
+///////////////////////////////////////// CYMBALS //////////////////////////////////
+
+
+~cymbal_bufnum = Pxrand(~cymbal_bufnums, inf);
+
+Pdef(\cymbals,
+    Pbind(
+        \instrument, \panningPlayBuf,
+        \bufnum, ~cymbal_bufnum,
+        \amp, Pgauss(0.3, 0.1, inf),
+        \rate, Pgauss(1.2, 0.6666, inf),
+        \panRate, Pgauss(1, 0.6666, inf),
+        \delta, Pgauss(20, 5, inf),
+        \filtfreq, Pgauss(1500, 250, inf),
+        \target, ~cymbal_group,
+        \t_trig, 1,
+        \callback, { ~send_color.(~cymbal_bufnum.asStream.next); },
+    )
+);
+
+Pdef(\cymbals).play;
+
+///////////////////////////////////////// SANSULAS //////////////////////////////////
+
 ~sansulas = ~generate_playbufs.(
     key: \playBuf,
     startId: 1,
@@ -351,21 +340,6 @@ target: ~couscous_group,
     out: 0,
     target: ~sansula_group,
 );
-/*~chess = ~generate_playbufs.(
-key: \playBuf,
-startId: 7,
-amps: ~chess_amps,
-out: 0,
-target: ~chess_group,
-);
-~cymbals = ~generate_playbufs.(
-key: \panningPlayBuf,
-startId: 9,
-amps: ~cymbal_amps,
-out: ~conv_bus,
-target: ~cymbal_group,
-args: [\panRate, 2],
-);*/
 
 ~random_play_sansulas = {
     var buffleShuffle = Pshuf(~sansula_bufnums, 1).asStream;
@@ -406,18 +380,52 @@ fork {
     }
 };
 
+/*~couscous = ~generate_playbufs.(
+key: \playBuf,
+startId: 0,
+amps: ~couscous_amps,
+out: 0,
+target: ~couscous_group,
+);*/
+
+/*~chess = ~generate_playbufs.(
+key: \playBuf,
+startId: 7,
+amps: ~chess_amps,
+out: 0,
+target: ~chess_group,
+);
+~cymbals = ~generate_playbufs.(
+key: \panningPlayBuf,
+startId: 9,
+amps: ~cymbal_amps,
+out: ~conv_bus,
+target: ~cymbal_group,
+args: [\panRate, 2],
+);*/
+
 )
 
-    exprand(0.01, 1)
+(
+///////////////////////////////////////// BUS CONTROL //////////////////////////////////
+
+~sansula_area_ctrl = Bus.control(s);
+~cymbal_area_ctrl = Bus.control(s);
+
+~sansula_group.map(\area, ~sansula_area_ctrl);
+~cymbal_group.map(\area, ~cymbal_area_ctrl);
+
+~sansula_amp_ctrl = Bus.control(s);
+~cymbal_amp_ctrl = Bus.control(s);
+
+~sansula_group.map(\grpAmp, ~sansula_amp_ctrl);
+~cymbal_group.map(\grpAmp, ~cymbal_amp_ctrl);
+
+~bus_ctrl.(~sansula_amp_ctrl, 0, 0.1);
+~bus_ctrl.(~cymbal_amp_ctrl, 1, 0.1);
+)
 
 ///////////////////////////////////////// END /////////////////////////////////////////
-
-{ EnvGen.kr(Env([0, 1], [5], 'sin'), doneAction: 2); }.plot(5)
-{ EnvGen.kr(Env.linen) }.plot(2);
-{ Lag3.kr(WhiteNoise.kr(1), 1) }.plot(2)
-{ Ramp.kr(WhiteNoise.kr(1), 1) }.plot(2)
-
-
 
 /*
 
